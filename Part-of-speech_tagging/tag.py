@@ -87,54 +87,106 @@ def writeDictToFiles(InitialStateDict,TransitionDict,ObservationDict):
     return
 
 def test(testOrder,InitialStateDict,TransitionDict,ObservationDict):
-    '采用viterbi算法，对测试文本进行词性标注'
+    '采用viterbi算法,+1平滑，对测试文本进行词性标注'
     testFileName = 'train{}.txt'
     testFileName = testFileName.format(str(testOrder))
-    with codecs.open(testFileName,'w','UTF-8') as testFile:
-        testLines = testFile.readlines()
-        for testline in testLines:            
-            lineList = list()       #记录一行的单词
-            Viterbi = dict()        #Viterbi词典的key=tag词性（状态j），value是一个dict：key=1 to T（T为观察序列的长度）即时刻t，value=t时刻到达状态j的viterbi路径的概率
-            Backpointers = dict()   #记录概率最大路径上当前状态的前一个状态,key=tag词性（状态j），value是一个dict：key=1 to T（T为观察序列的长度）即时刻t，value=概率最大路径上当前状态的前一个状态
+    resultFileName = 'result{}.txt'
+    resultFileName = resultFileName.format(str(testOrder))
+    accuracy = int()
+    lineCnt = 0
+    with codecs.open(resultFileName,'w','UTF-8') as resultFile:
+        with codecs.open(testFileName,'r','UTF-8') as testFile:
+            testLines = testFile.readlines()
+            for testline in testLines:       
+                lineAccuracy = 0     
+                lineList = list()       #记录一行的单词
+                tagList = list()        #记录一行的词性
+                Viterbi = dict()        #Viterbi词典的key=tag词性（状态j），value是一个dict：key=1 to T（T为观察序列的长度）即时刻t，value=t时刻到达状态j的viterbi路径的概率
+                Backpointers = dict()   #记录概率最大路径上当前状态的前一个状态,key=tag词性（状态j），value是一个dict：key=1 to T（T为观察序列的长度）即时刻t，value=概率最大路径上当前状态的前一个状态
 
-            for part in testline.split:
-                #分词跳过词性标注，只取单词
-                part = part.strip()
-                parted = re.split('/',part)
-                word = parted[0]
-                lineList.append(word)
-            #初始化
-            for tagStateKey in InitialStateDict:
-                if (tagStateKey != '<BOS>') and (tagStateKey != '<EOS>'):
-                    Viterbi[tagStateKey] = dict()
-                    Viterbi[tagStateKey][1] = (TransitionDict['<BOS>'].get(tagStateKey,0) / InitialStateDict['<BOS>']) * (ObservationDict[tagStateKey].get(lineList[0],0) / InitialStateDict[tagStateKey])
-                    Backpointers[tagStateKey] = dict()
-                    Backpointers[tagStateKey][1] = 0
-            #归纳运算
-            for time in range(2,len(lineList) + 1,1):
-                for stateKey in InitialStateDict:
-                    if (stateKey != '<BOS>') and (stateKey != '<EOS>'): 
-                        perhapsProbDict = dict()         #用来记录归纳运算中每个可能的概率及其对应的上一状态（词性）             
-                        for lastState in InitialStateDict:
-                            if (lastState != '<BOS>') and (lastState != '<EOS>'):
-                                v = Viterbi[lastState][time - 1] * (TransitionDict[lastState].get(stateKey,0) / InitialStateDict[lastState]) * (ObservationDict[stateKey].get(lineList[time - 1],0) / InitialStateDict[stateKey])
-                                perhapsProbDict[lastState] = v
-                        Backpointers[stateKey][time] = max(perhapsProbDict,key = perhapsProbDict.get)
-                        Viterbi[stateKey][time] = perhapsProbDict[Backpointers[stateKey][time]]
-            #结束
-            perhapsProbDict = dict()         #用来记录每个可能的概率及其对应的状态（词性）
-            for state in InitialStateDict:
-                if (state != '<BOS>') and (state != '<EOS>'):
-                    v = Viterbi[state][len(lineList)] * (TransitionDict[state].get('<EOS>',0) / InitialStateDict[state])
-                    perhapsProbDict[state] = v
-            Backpointers['<EOS>'][len(lineList)] = max(perhapsProbDict,key = perhapsProbDict.get)
-            Viterbi['<EOS>'][len(lineList)] = perhapsProbDict[Backpointers['<EOS>'][len(lineList)]]
+                for part in testline.split():
+                    #分词跳过词性标注，只取单词用来测试，词性作为准确率评判
+                    part = part.strip()
+                    parted = re.split('/',part)
+                    word = parted[0]
+                    lineList.append(word)
+                    tag = parted[1]
+                    tagList.append(tag)
+                lineLength = len(lineList)
+                if(lineLength != 0): #该行不为空
+                    lineCnt += 1
+                    #初始化
+                    for tagStateKey in InitialStateDict:
+                        Viterbi[tagStateKey] = dict()
+                        Backpointers[tagStateKey] = dict()
+                        if (tagStateKey != '<BOS>') and (tagStateKey != '<EOS>'):
+                            Viterbi[tagStateKey][1] = (((TransitionDict['<BOS>'].get(tagStateKey,0) + 1) / (InitialStateDict['<BOS>'] + len(InitialStateDict) - 1)) 
+                            * ((ObservationDict[tagStateKey].get(lineList[0],0) + 1) / (InitialStateDict[tagStateKey] + len(InitialStateDict) - 1)))
+                            Backpointers[tagStateKey][1] = 0
+                    #归纳运算
+                    for time in range(2,len(lineList) + 1,1):
+                        for stateKey in InitialStateDict:
+                            if (stateKey != '<BOS>') and (stateKey != '<EOS>'): 
+                                perhapsProbDict = dict()         #用来记录归纳运算中每个可能的概率及其对应的上一状态（词性）             
+                                for lastState in InitialStateDict:
+                                    if (lastState != '<BOS>') and (lastState != '<EOS>'):
+                                        v = (Viterbi[lastState][time - 1] 
+                                        * ((TransitionDict[lastState].get(stateKey,0) + 1) / (InitialStateDict[lastState] + len(InitialStateDict) - 1)) 
+                                        * ((ObservationDict[stateKey].get(lineList[time - 1],0) + 1) / (InitialStateDict[stateKey] + len(InitialStateDict) - 1)))
+                                        perhapsProbDict[lastState] = v
+                                Backpointers[stateKey][time] = max(perhapsProbDict,key = perhapsProbDict.get)
+                                Viterbi[stateKey][time] = perhapsProbDict[Backpointers[stateKey][time]]
+                    #结束
+                    perhapsProbDict = dict()         #用来记录每个可能的概率及其对应的状态（词性）
+                    for state in InitialStateDict:
+                        if (state != '<BOS>') and (state != '<EOS>'):
+                            v = (Viterbi[state][len(lineList)] 
+                            * ((TransitionDict[state].get('<EOS>',0) + 1) / (InitialStateDict[state] + len(InitialStateDict) - 1)))
+                            perhapsProbDict[state] = v
+                    Backpointers['<EOS>'][len(lineList)] = max(perhapsProbDict,key = perhapsProbDict.get)
+                    Viterbi['<EOS>'][len(lineList)] = perhapsProbDict[Backpointers['<EOS>'][len(lineList)]]
 
-    #求正确率，并返回correctRate = 
-    return
+                    resultTag = list()
+                    i = len(tagList)
+                    tag = Backpointers['<EOS>'][i]
+                    while i > 0:
+                        resultTag.insert(0,tag)
+                        if tagList[i - 1] == tag:
+                            lineAccuracy += 1
+                        tag = Backpointers[tag][i]
+                        i -= 1
+                    lineAccuracy = lineAccuracy / len(tagList)
+                    accuracy += lineAccuracy
+                    
+                    resultFile.write('分词结果:')
+                    for i in range(0,lineList.__len__(),1):
+                        resultFile.write(lineList[i])
+                        resultFile.write('/')
+                        resultFile.write(resultTag[i])
+                        resultFile.write(' ')
+                    resultFile.write('\n')
+                    resultFile.write('分词正解:')
+                    for i in range(0,lineList.__len__(),1):
+                        resultFile.write(lineList[i])
+                        resultFile.write('/')
+                        resultFile.write(tagList[i])
+                        resultFile.write(' ')
+                    resultFile.write('\n')
+                    resultFile.write('tagging accuaracy = ')
+                    resultFile.write(str(lineAccuracy))
+                    resultFile.write('\n')
+        accuracy = accuracy / lineCnt
+        resultFile.write('average tagging accuracy = ')
+        resultFile.write(str(accuracy))
+        resultFile.write('\n')
+
+    return accuracy
 
 #main program
+accuracy = 0.0
 for i in range(1,6,1):
     InitialStateDict,TransitionDict,ObservationDict = train(i)
     writeDictToFiles(InitialStateDict,TransitionDict,ObservationDict)
-    test(i,InitialStateDict,TransitionDict,ObservationDict)
+    accuracy += test(i,InitialStateDict,TransitionDict,ObservationDict)
+accuracy = accuracy / 5
+print('5倍交叉验证法得到词性标注的平均准确率为：',accuracy)
